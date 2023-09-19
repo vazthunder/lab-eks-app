@@ -1,0 +1,35 @@
+---
+
+version: 0.2
+
+env:
+  variables:
+    PROJECT: "myproj"
+    ENV: "dev"
+    APP_NAME: "app"
+
+phases:
+  pre_build:
+    commands:
+      - echo "\n[!] Assuming EKS master role..."
+      - aws configure --profile eks-master set role_arn $EKS_MASTER_ROLE
+      - aws configure --profile eks-master set credential_source EcsContainer
+      - export AWS_DEFAULT_PROFILE=eks-master
+      - echo "\n[!] Logging in to ECR..."
+      - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+      - ECR_REGISTRY_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+      - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY_URL
+      - echo "\n[!] Generating EKS kubeconfig..."
+      - aws eks update-kubeconfig --region $AWS_REGION --name $EKS_CLUSTER_NAME
+  build:
+    commands:
+      - echo "\n[!] Building Docker image..."
+      - docker build -t $ECR_REGISTRY_URL/$PROJECT-$ENV-$APP_NAME:latest .
+  post_build:
+    commands:
+      - echo "\n[!] Pushing Docker image to ECR..."
+      - docker push $ECR_REGISTRY_URL/$PROJECT-$ENV-$APP_NAME:latest
+      - echo "\n[!] Rollout new version to EKS..."
+      - kubectl -n $PROJECT rollout restart deployment $PROJECT-$APP_NAME
+
+...
