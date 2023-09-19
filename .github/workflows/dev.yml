@@ -1,0 +1,47 @@
+---
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ dev ]
+
+env:
+  PROJECT: "myproj"
+  ENV: "dev"
+  APP_NAME: "app"
+  AWS_REGION: "us-east-2"
+
+jobs:
+  build:
+    name: "Build"
+    runs-on: [ "self-hosted", "myproj", "dev", "bastion" ]
+    steps:
+      - name: "Checkout"
+        uses: actions/checkout@v2
+      - name: "Setup AWS information"
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-region: ${{ env.AWS_REGION }}
+      - name: "Login to Amazon ECR"
+        id: login-ecr
+        uses: aws-actions/amazon-ecr-login@v1
+        with:
+          mask-password: true
+      - name: "Build and push the image to Amazon ECR"
+        env:
+          ECR_REGISTRY: ${{ steps.login-ecr.outputs.registry }}
+        run: |
+          docker build -t $ECR_REGISTRY/$PROJECT-$ENV-$APP_NAME:latest .
+          docker push $ECR_REGISTRY/$PROJECT-$ENV-$APP_NAME:latest
+
+  deploy:
+    name: "Deploy"
+    needs: build
+    runs-on: [ "self-hosted", "myproj", "dev", "bastion" ]
+    steps:
+      - name: "Rollout deployment on EKS Cluster"
+        run: |
+          aws eks update-kubeconfig --region $AWS_REGION --name $PROJECT-$ENV-cluster
+          kubectl -n $PROJECT rollout restart deployment $PROJECT-$APP_NAME
+
+...
