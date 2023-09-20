@@ -1,0 +1,44 @@
+stages:
+  - build
+  - deploy
+
+workflow:
+  rules:
+    - if: $CI_PIPELINE_SOURCE == "push"
+    - if: $CI_PIPELINE_SOURCE == "web"
+
+variables:
+  PROJECT: "myproj"
+  APP_NAME: "app"
+  AWS_REGION: "us-east-2"
+
+build-dev:
+  stage: build
+  tags: [ "myproj", "dev", "bastion" ]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+  variables:
+    ENV: "dev"
+  script:
+    - AWS_ACCOUNT_ID=$(aws sts get-caller-identity --query "Account" --output text)
+    - ECR_REGISTRY_URL="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+    - aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $ECR_REGISTRY_URL
+    - docker build -t $ECR_REGISTRY_URL/$PROJECT-$ENV-$APP_NAME:latest .
+    - docker push $ECR_REGISTRY_URL/$PROJECT-$ENV-$APP_NAME:latest
+
+deploy-dev:
+  stage: deploy
+  tags: [ "myproj", "dev", "bastion" ]
+  rules:
+    - if: $CI_COMMIT_BRANCH == "dev"
+  variables:
+    ENV: "dev"
+  script:
+    - aws eks update-kubeconfig --region $AWS_REGION --name $PROJECT-$ENV-cluster
+    - kubectl -n $PROJECT rollout restart deployment $PROJECT-$APP_NAME
+
+# build-prod:
+#   stage: build
+
+# deploy-prod:
+#   stage: deploy
